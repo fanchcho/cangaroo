@@ -72,7 +72,7 @@ void CanListener::run()
     _openComplete = true;
     CanMessage msg;
     while (_shouldBeRunning) {
-        if (_intf.readMessage(rxMessages, 1000)) {
+        if (_intf.readMessage(rxMessages, 10)) {  // 降低超时到10ms以提高响应速度
             for (int i = 0; i < rxMessages.size(); i++) {
                 msg = rxMessages.at(i);
                 trace->enqueueMessage(msg, false);

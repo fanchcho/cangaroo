@@ -120,6 +120,28 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src;${CMAKE_CURRENT_SOURCE_DIR}/src/window;${CMAKE_CURRENT_SOURCE_DIR}/src/window/CanCfgWindow;${CMAKE_CURRENT_SOURCE_DIR}/src/window/CanStatusWindow;${CMAKE_CURRENT_SOURCE_DIR}/src/window/GraphWindow;${CMAKE_CURRENT_SOURCE_DIR}/src/window/LogWindow;${CMAKE_CURRENT_SOURCE_DIR}/src/window/RawTxWindow;${CMAKE_CURRENT_SOURCE_DIR}/src/window/SetupDialog;${CMAKE_CURRENT_SOURCE_DIR}/src/window/TraceWindow;${CMAKE_CURRENT_SOURCE_DIR}/src/driver"
 )
 
+# macOS bundle configuration
+if(APPLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE_INFO_STRING "Cangaroo CAN Bus Analyzer"
+        MACOSX_BUNDLE_BUNDLE_NAME "Cangaroo"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.github.cangaroo"
+        MACOSX_BUNDLE_BUNDLE_VERSION "0.1"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
+        MACOSX_BUNDLE_COPYRIGHT "Copyright © 2015-2025"
+        MACOSX_BUNDLE_INFO_PLIST_ADDITIONS "
+            <key>NSAppleEventsUsageDescription</key>
+            <string>Cangaroo needs access to Apple events to open files and communicate with the system.</string>
+            <key>NSDocumentsFolderUsageDescription</key>
+            <string>Cangaroo needs access to documents folder to open CAN database files (.dbc).</string>
+            <key>NSDesktopFolderUsageDescription</key>
+            <string>Cangaroo needs access to desktop folder to open CAN database files (.dbc).</string>
+            <key>NSDownloadsFolderUsageDescription</key>
+            <string>Cangaroo needs access to downloads folder to open CAN database files (.dbc).</string>
+        "
+    )
+endif()
+
 # Include directories (project subdirs)
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -137,11 +159,31 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt5::Charts
 )
 
-# Link local libPCBUSB if present in project root and bundle it on macOS
-set(LOCAL_PCB_LIB ${CMAKE_CURRENT_SOURCE_DIR}/libPCBUSB.0.12.1.dylib)
+# Link local libPCBUSB if present - platform-specific library selection
+set(PCAN_API_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/driver/PeakCanDriver/api)
+
+if(WIN32)
+    # Windows: use .dll
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(LOCAL_PCB_LIB ${PCAN_API_DIR}/PCANBasic.dll)
+    else()
+        set(LOCAL_PCB_LIB ${PCAN_API_DIR}/PCANBasic.dll)
+    endif()
+elseif(APPLE)
+    # macOS: use .dylib
+    set(LOCAL_PCB_LIB ${PCAN_API_DIR}/OSX/libPCBUSB.0.13.dylib)
+elseif(UNIX)
+    # Linux: use .so
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(LOCAL_PCB_LIB ${PCAN_API_DIR}/libpcanbasic.so)
+    else()
+        set(LOCAL_PCB_LIB ${PCAN_API_DIR}/libpcanbasic.so)
+    endif()
+endif()
+
 if(EXISTS ${LOCAL_PCB_LIB})
-    message(STATUS "Found local libPCBUSB: ${LOCAL_PCB_LIB}")
-    # Link against the local dylib
+    message(STATUS "Found local PCAN library: ${LOCAL_PCB_LIB}")
+    # Link against the local library
     target_link_libraries(${PROJECT_NAME} PRIVATE ${LOCAL_PCB_LIB})
     
     if(APPLE)
@@ -163,7 +205,25 @@ if(EXISTS ${LOCAL_PCB_LIB})
             BUILD_RPATH "@executable_path/../Frameworks"
             INSTALL_RPATH "@executable_path/../Frameworks"
         )
+    elseif(WIN32)
+        # Windows: copy DLL to output directory
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LOCAL_PCB_LIB}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            COMMENT "Copying PCAN DLL to output directory"
+        )
+    elseif(UNIX)
+        # Linux: set rpath to look in executable directory
+        set_target_properties(${PROJECT_NAME} PROPERTIES 
+            BUILD_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN"
+        )
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LOCAL_PCB_LIB}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            COMMENT "Copying PCAN library to output directory"
+        )
     endif()
+else()
+    message(STATUS "PCAN library not found at: ${LOCAL_PCB_LIB}")
 endif()
 
 # Deployment notes: on Windows users may use windeployqt; on macOS bundle is created automatically when MACOSX_BUNDLE is used

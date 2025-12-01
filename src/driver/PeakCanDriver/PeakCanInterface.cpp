@@ -2,25 +2,12 @@
 #include "PeakCanDriver.h"
 
 #include <core/MeasurementInterface.h>
-#ifdef _WIN32
-#include <windows.h>
-#elif defined(__APPLE__)
+#if defined(__APPLE__)
 #include <dispatch/dispatch.h>
-#define LPSTR  char*
-#define UINT64 uint64_t
-#define DWORD  uint32_t
-#define WORD   uint16_t
-#define BYTE   uint8_t
 #else
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
-#define LPSTR  char*
-#define UINT64 uint64_t
-#define DWORD  uint32_t
-#define WORD   uint16_t
-#define BYTE   uint8_t
-
 // Cross-platform event wrapper for Linux
 struct EventWrapper {
     std::mutex mutex;
@@ -31,12 +18,14 @@ struct EventWrapper {
 #include "api/Include/PCANBasic.h"
 
 #include <QThread>
+#include <sys/time.h>
 
 PeakCanInterface::PeakCanInterface(PeakCanDriver *driver, uint32_t handle)
   : CanInterface(driver),
     _handle(handle),
     _hostOffsetFirstFrame(0),
-    _peakOffsetFirstFrame(0)
+    _peakOffsetFirstFrame(0),
+    _isOpen(false)
 {
 #ifdef _WIN32
     _autoResetEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -257,13 +246,20 @@ void PeakCanInterface::open()
 
     _peakOffsetFirstFrame = 0;
     _hostOffsetFirstFrame = 0;
+    _isOpen = true;
 
+}
+
+bool PeakCanInterface::isOpen()
+{
+    return _isOpen;
 }
 
 void PeakCanInterface::close()
 {
     CAN_Uninitialize(_handle);
     log_info(QString("CAN channel %1 uninitialized").arg(getName()));
+    _isOpen = false;
 }
 
 uint32_t PeakCanInterface::getState()
@@ -307,6 +303,7 @@ bool PeakCanInterface::readMessage(QList<CanMessage> &msglist, unsigned int time
             msg.setErrorFrame(false);
         }
 
+        msg.setDirection(CanMessage::Rx);
         msg.setInterfaceId(getId());
         msg.setId(buf.ID);
         msg.setExtended((buf.MSGTYPE & PCAN_MESSAGE_EXTENDED)!=0);
@@ -346,21 +343,34 @@ bool PeakCanInterface::readMessage(QList<CanMessage> &msglist, unsigned int time
 void PeakCanInterface::sendMessage(const CanMessage &msg)
 {
     TPCANMsg buf;
+    CanMessage msgCopy = msg;
+    msgCopy.setInterfaceId(getId());
+    msgCopy.setDirection(CanMessage::Tx);
+
+    memset(&buf, 0, sizeof(buf));
     buf.ID = msg.getId();
     buf.MSGTYPE = 0;
     if (msg.isExtended()) {
         buf.MSGTYPE |= PCAN_MESSAGE_EXTENDED;
     }
     if (msg.isRTR()) {
-        buf.MSGTYPE |= PCAN_MESSAGE_EXTENDED;
+        buf.MSGTYPE |= PCAN_MESSAGE_RTR;
     }
 
     buf.LEN = msg.getLength();
     for (int i=0; i<8; i++) {
         buf.DATA[i] = msg.getByte(i);
     }
-    CAN_Write(_handle, &buf);
-    // TODO check error, update statistics (increment txerrors or txframes)
+
+    TPCANStatus result = CAN_Write(_handle, &buf);
+    if (result == PCAN_ERROR_OK) {
+        struct timeval tv;
+        gettimeofday(&tv, nullptr);  // 获取当前时间
+        msgCopy.setTimestamp(tv);
+        Backend::instance().addSentMessage(msgCopy);
+    } else {
+        log_error(QString("failed to send CAN frame on %1: %2").arg(getName()).arg(getErrorText(result)));
+    }
 }
 
 bool PeakCanInterface::updateStatistics()

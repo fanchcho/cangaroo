@@ -23,6 +23,7 @@ public:
     virtual QList<CanTiming> getAvailableBitrates();
 
     virtual void open();
+    virtual bool isOpen();
     virtual void close();
 
     virtual void sendMessage(const CanMessage &msg);
@@ -42,6 +43,7 @@ private:
     uint64_t _hostOffsetFirstFrame;
     uint64_t _peakOffsetFirstFrame;
     void *_autoResetEvent;
+    bool _isOpen;
 
     struct {
         bool autoRestart;

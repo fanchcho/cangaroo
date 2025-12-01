@@ -1,16 +1,6 @@
 #include "PeakCanDriver.h"
 #include "PeakCanInterface.h"
 #include <driver/GenericCanSetupPage.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#define LPSTR  char*
-#define UINT64 uint64_t
-#define DWORD  uint32_t
-#define WORD   uint16_t
-#define BYTE   uint8_t
-#endif
 #include "api/Include/PCANBasic.h"
 
 PeakCanDriver::PeakCanDriver(Backend &backend)
